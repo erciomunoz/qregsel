@@ -30,7 +30,14 @@ program define qregsel, eclass sortpreserve
 		local x_s `3'
 	}		
 	capture unab x_s : `x_s'
-	
+
+********************************************************************************	
+** Python integration
+********************************************************************************
+
+if "`py'" == "py" {
+python: from rotated_qr_fn import rotated_qr
+}	
 	
 ********************************************************************************	
 ** Marking the sample to use (selected observations)
@@ -402,13 +409,6 @@ void minmatrix(string scalar obj, string scalar G2)
 
 end
 
-********************************************************************************	
-** Python integration
-********************************************************************************
 
-version 16.0
-python:
-from rotated_qr_fn import rotated_qr
-end
 
 
