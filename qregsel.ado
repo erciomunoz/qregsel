@@ -1,17 +1,18 @@
-*! version 1.0.0 20April2020
+*! version 1.1 24July2020
 * Authors: Ercio Munoz & Mariel Siravegna 
 
 /* Wrap file to implement copula-based sample selection model in quantile 
 regression as suggested by Arellano and Bonhomme (2017). */
+
 * qregselection wage educ age, quantile(.1 .5 .9) select(married children educ age) py grid_min(-.99) grid_max(.99) grid_length(.02)
 
 cap program drop qregsel
 program define qregsel, eclass sortpreserve
     version 16.0
 
-    syntax varlist(numeric ts fv) [if] [in], SELect(string) quantile(string) ///
+    syntax varlist(numeric) [if] [in], SELect(string) quantile(string) ///
 	grid_min(real) grid_max(real) grid_length(real) ///
-	[ copula(string) noCONStant py plot ]
+	[ copula(string) noCONStant plot ]
     
     gettoken depvar indepvars : varlist
     _fv_check_depvar `depvar'
@@ -30,14 +31,6 @@ program define qregsel, eclass sortpreserve
 		local x_s `3'
 	}		
 	capture unab x_s : `x_s'
-
-********************************************************************************	
-** Python integration
-********************************************************************************
-
-if "`py'" == "py" {
-python: from rotated_qr_fn import rotated_qr
-}	
 	
 ********************************************************************************	
 ** Marking the sample to use (selected observations)
@@ -133,13 +126,8 @@ local tau = `k'/10
 qui:	mata: copulafn("`pZ'",`rhoa',`tau',"`touse'","`copula_cdf'","`copula'")
 
 ** Rotated quantile regression
-if "`py'" == "" {
 qui:	mata: mywork("`depvar'", "`cnames'", "`touse'", "`constant'", ///
 	"`b'", "`N'", "`rank'", "`df_r'","`it'","`copula_cdf'")
-	} 
-else {
-python: rotated_qr("`cnames'", "`depvar'","`copula_cdf'","`touse'", "`b'", "`N'", "`rank'", "`df_r'")	
-	}
 
 ** Obtain value for the grid to be minimized
 qui:	mata: objective("`pZ'",`rhoa',`tau',"`touse'", ///
@@ -236,15 +224,9 @@ local rho = `grid_min' + (`index_min'-1)*`grid_length'
 qui:	mata: copulafn("`pZ'",`rho',`tau',"`touse'","`copula_cdf'","`copula'")
 
 ** Rotated quantile regression
-if "`py'" == "" {
 qui:	mata: mywork("`depvar'", "`cnames'", "`touse'", "`constant'", ///
 	"`b'", "`N'", "`rank'", "`df_r'","`it'","`copula_cdf'")
 qui: cap drop `copula_cdf'
-}
-else {
-python: rotated_qr("`cnames'", "`depvar'","`copula_cdf'","`touse'", "`b'", "`N'", "`rank'", "`df_r'")
-qui: cap drop `copula_cdf'
-}
 
 local qtau = 100*`tau'
 mat colnames `b' = "q`qtau'"
@@ -272,10 +254,10 @@ matrix rownames `betas_taus' = `cnames'
 	ereturn scalar rank    = `rank'
     ereturn scalar df_r    = `df_r'
     ereturn scalar rho     = `rho'
+	ereturn scalar it      = `it'
 	ereturn local title   "Quantile selection model"
 	ereturn local predict "qregsel_p"
     ereturn local cmd     "qregsel"
-	ereturn local py "`py'"
 	ereturn local selection_eq "`select'"	
 	ereturn local outcome_eq "`depvar' `indepvars'"
 	ereturn local cmdline "qregsel `depvar' `indepvars', select(`select')"
@@ -329,44 +311,32 @@ void mywork( string scalar depvar,  	string scalar indepvars,
 			 string scalar rname,       string scalar dfrname, 
 			 string scalar itname, 		string scalar cdf) 
 {
-
-    real vector y, b
-    real matrix X, c, Aec, lowebd, upperbd, P2
-    real scalar n, k, it
+    real vector y, p
+    real matrix X, u, a, b
+    real scalar m, n, k, it
 
     y    = st_data(., depvar, touse)
     X    = st_data(., indepvars, touse)
- 	G    = st_data(., cdf, touse)'
-    n    = rows(X)
-
+ 	p    = st_data(., cdf, touse) 
+	
+	m    = rows(X)
+	n    = cols(X)
+	
     if (constant == "") {
-        X    = X,J(n,1,1)
+    X    = X,J(m,1,1)
     }
 	k    = cols(X) 
 	
-    c = (J(1, k, 0), G :* J(1, n, 1), (1 :- G) :* J(1, n, 1))
-	Aec = (X, I(n), -I(n))
-	lowerbd = (J(1, k, .), J(1, 2*n, 0))
-	upperbd = J(1, 2*n + k, .)
+	u    = J(m, 1, 1)
+	a    = (1:-p):*u
+	it=0
+	b    = -lp_fnm(X',-y',X'*a,u,a,it)'
 	
-	class LinearProgram scalar q
-	q = LinearProgram()
-	q.setCoefficients(c)
-	q.setEquality(Aec, y)
-	q.setBounds(lowerbd, upperbd)
-	q.setMaxOrMin("min")
-	q.setTol(1e-04)
-	q.setMaxiter(50)
-	q.optimize()
-	it = q.iterations()
-	b = q.parameters()
-	b = b[1..k]'
-	
-    st_matrix(bname, b)
+	st_matrix(bname, b)
     st_numscalar(itname, it)
-    st_numscalar(nname, n)
+    st_numscalar(nname, m)
     st_numscalar(rname, k)
-    st_numscalar(dfrname, n-k)
+    st_numscalar(dfrname, m-k)
 	
 }
 
@@ -407,6 +377,111 @@ void minmatrix(string scalar obj, string scalar G2)
 	
 }
 
+end
+
+cap mata mata drop lp_fnm()
+mata:
+real matrix function lp_fnm(real matrix A,
+							real matrix c,
+							real matrix b,
+							real matrix u,
+							real matrix x,
+							real scalar it)
+{ 
+
+  beta = 0.9995
+  small = 1e-5
+  max_it = 50
+  m = rows(A)
+  n = cols(A)
+
+// Generate initial feasible point 
+  s = u - x  
+  y = svsolve(A',c')'
+  r = c - y * A
+  r = mm_cond(r:==0,r:+0.001,r)  
+  z = mm_cond(r:>0,r,0)
+  w = z - r
+  gap = c * x - y * b + w * u
+
+// Start iterations
+ it = 0
+while (gap > small & it < max_it) {
+    it++
+
+// Compute affine step
+    q = 1 :/ (z' :/ x + w' :/ s)
+    r = z - w
+    Q = SPMATbandedmake(diag(sqrt(q)),0,0)
+    AQ = SPMATbandedmultfull(Q,0,0,A')'
+	rhs = SPMATbandedmultfull(Q,0,0,r')
+    dy = (svsolve(AQ',rhs))'
+    dx = q :* (dy * A - r)'
+    ds = -dx
+    dz = -z :* (1 :+ dx :/ x)'
+    dw = -w :* (1 :+ ds :/ s)'
+
+// Compute maximum allowable step lengths
+    fx = bound(x, dx)
+    fs = bound(s, ds)
+    fw = bound(w, dw)
+    fz = bound(z, dz)
+    fp = mm_cond(fx:<fs,fx,fs) 
+	fd = mm_cond(fw:<fz,fw,fz)
+	fp = mm_cond(min(beta * fp):<1,min(beta * fp),1) 
+	fd = mm_cond(min(beta * fd):<1,min(beta * fd),1) 
+	
+if (mm_cond(fp:<fd,fp,fd) < 1) {
+    
+// Update mu
+      mu = z * x + w * s
+      g = (z + fd * dz) * (x + fp * dx) + (w + fd * dw) * (s + fp * ds)
+      mu = mu * (g / mu) ^3 / ( 2 * n)
+
+// Compute modified step
+      dxdz = dx :* dz'
+      dsdw = ds :* dw'
+      xinv = 1 :/ x
+      sinv = 1 :/ s
+      xi = mu * (xinv - sinv)
+	  rhs = rhs + SPMATbandedmultfull(Q,0,0,( dxdz - dsdw -xi ))
+	  dy = (svsolve(AQ',rhs))'
+      dx = q :* (A' * dy' + xi - r' -dxdz + dsdw)
+      ds = -dx
+      dz = mu * xinv' - z - xinv' :* z :* dx' - dxdz'
+      dw = mu * sinv' - w - sinv' :* w :* ds' - dsdw'
+
+// Compute maximum allowable step lengths
+      fx = bound(x, dx)
+      fs = bound(s, ds)
+      fw = bound(w, dw)
+      fz = bound(z, dz)
+	  fp = mm_cond(fx:<fs,fx,fs) 
+	  fd = mm_cond(fw:<fz,fw,fz)
+	  fp = mm_cond(min(beta * fp):<1,min(beta * fp),1) 
+	  fd = mm_cond(min(beta * fd):<1,min(beta * fd),1) 
+}
+
+// Take the step
+    x = x + fp * dx
+    s = s + fp * ds
+    y = y + fd * dy
+    w = w + fd * dw
+    z = z + fd * dz
+    gap = c * x - y * b + w * u
+}
+return(y)
+}
+end
+********************************************************************************
+// Bound function
+********************************************************************************
+cap mata: mata drop bound()
+mata:
+real matrix function bound(real matrix x, real matrix dx)
+{
+	return(mm_cond(dx:<0,-x:/dx,1e20 :+ 0 :* x))
+}
 end
 
 
