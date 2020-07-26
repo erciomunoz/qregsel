@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 1.0.0 April 2020}{...}
+{* *! version 1.1 July 2020}{...}
 {cmd: help qregsel}
 {hline}
 
@@ -23,7 +23,6 @@
 [
 {cmd:copula(}{it:copula}{cmd:)}
 {cmdab:nocons:tant}
-{cmdab:py}
 {cmdab:plot}
 ]
 
@@ -45,8 +44,6 @@
 	default is gaussian.{p_end}
 
 {synopt:{opt nocons:tant}}suppresses a constant term in the outcome equation.{p_end}
-
-{synopt:{opt py:}}call python to estimate the rotated quantile regression.{p_end}
 
 {synopt:{opt plot:}}generates a line graph of the value of the objective function over rho's grid.{p_end}
 
@@ -97,9 +94,6 @@ Default is {bf:gaussian}.
 {opt noncons:tant} suppresses a constant term of the outcome equation.
 
 {phang}
-{opt py} call python to estimate the rotated quantile regression. Python 3 or higher and the packages pandas, io, requests, numpy, and cvxopt are required to be installed. 
-
-{phang}
 {opt plot} generates a line graph of the value of the objective function over rho's grid. By default the grid is composed by 199 evenly space values. 
 
 
@@ -115,6 +109,7 @@ Default is {bf:gaussian}.
 {synopt:{cmd:e(rank)}}number of parameters{p_end}
 {synopt:{cmd:e(df_r)}}degrees of freedom{p_end}
 {synopt:{cmd:e(rho)}}copula parameter{p_end}
+{synopt:{cmd:e(it)}}number of iterations{p_end}
 
 {synoptset 20 tabbed}{...}
 {p2col 5 20 24 2: Macros}{p_end}
@@ -125,7 +120,6 @@ Default is {bf:gaussian}.
 {synopt:{cmd:e(outcome_eq)}}outcome equation{p_end}
 {synopt:{cmd:e(select_eq)}}selection equation{p_end}
 {synopt:{cmd:e(predict)}}predict command name{p_end}
-{synopt:{cmd:e(py)}}called python integration{p_end}
 {synopt:{cmd:e(cmd)}}{cmd:qregsel}{p_end}
 {synopt:{cmd:e(title)}}title in estimation output{p_end}
 
