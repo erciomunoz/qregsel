@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 1.1 July 2020}{...}
+{* *! version 1.1 September 2020}{...}
 {cmd: help qregsel}
 {hline}
 
@@ -17,13 +17,11 @@
 {cmd:,}
 {cmdab:sel:ect(}[{it:depvar_s} {cmd:=}] {it:varlist_s}{cmd:)}
 {cmd:quantile(}{it:#}{cmd:)}
-{cmd:grid_min(}{it:#}{cmd:)}
-{cmd:grid_max(}{it:#}{cmd:)}
-{cmd:grid_length(}{it:#}{cmd:)}
 [
 {cmd:copula(}{it:copula}{cmd:)}
 {cmdab:nocons:tant}
-{cmdab:plot}
+{cmdab:finergrid}
+{cmdab:rescale}
 ]
 
 {synoptset 20 tabbed}{...}
@@ -34,31 +32,25 @@
 
 {synopt:{opt quantile:(#)}}specifies the quantiles to be estimated.{p_end}
 
-{synopt:{opt grid_min:(#)}}specifies the minimum value to be considered in the grid search.{p_end}
-
-{synopt:{opt grid_max:(#)}}specifies the maximum value to be considered in the grid search.{p_end}
-
-{synopt:{opt grid_length:(#)}}specifies the length of the (evenly spaced) grid to be considered in the grid search.{p_end}
-
 {synopt:{opt copula:(copula)}}specifies a copula;
 	default is gaussian.{p_end}
 
 {synopt:{opt nocons:tant}}suppresses a constant term in the outcome equation.{p_end}
 
-{synopt:{opt plot:}}generates a line graph of the value of the objective function over rho's grid.{p_end}
+{synopt:{opt finergrid:}}find the value of the copula parameter using a grid of 199 values instead of 100, as done by default.{p_end}
+
+{synopt:{opt rescale:}}rescale the regressors in the outcome equation.{p_end}
 
 
 
 {title:Description}
 
 {pstd}
-{cmd:qregsel} estimates a copula-based sample selection model for quantile regression.	
+{cmd:qregsel} estimates a copula-based sample selection model for quantile regression.
 Users can specify a copula from the lists below. 
 
 {p 4 4 2}
-Available copulas are 
-
-{p 8 8 2} {it: gaussian, fgm, amh}, and {it:frank}.
+Available copulas are {it: gaussian} and {it:frank}.
 
 {p 4 4 2} 
 Notes: The name of the copula is case-sensitive. 
@@ -76,15 +68,6 @@ and 1 indicating {it:depvar} observed for an observation.
 {phang} 
 {opt quantile(#)} is required. It specifies a set of quantiles to be estimated.
 
-{phang} 
-{opt grid_min:(#)} specifies the minimum value to be considered in the grid search. grid_min() is required. It must be greater than -1 when copula is gaussian, fgm, or amh.
-
-{phang} 
-{opt grid_max:(#)} specifies the maximum value to be considered in the grid search. grid_max() is required and cannot be smaller than grid_min(). It must be smaller than 1 when copula is gaussian, fgm, or amh.
-
-{phang} 
-{opt grid_length:(#)} specifies the length of the (evenly spaced) grid to be considered in the grid search. grid_length() is required. It can be set to 0 if grid_min() and grid_max() are equal.
-
 {phang}
 {opt copula(copula)} specifies a copula function for the dependence between outcome and selection equation.
 See above for the list of available copulas. 
@@ -94,9 +77,11 @@ Default is {bf:gaussian}.
 {opt noncons:tant} suppresses a constant term of the outcome equation.
 
 {phang}
-{opt plot} generates a line graph of the value of the objective function over rho's grid. By default the grid is composed by 199 evenly space values. 
+{opt finergrid} find the value of the copula parameter using a grid of 199 values instead of 100, as done by default. These values are chosen such that U and V have a rank correlation between -.99 and .99.
 
-
+{phang}
+{opt rescale} rescale the regressors of the outcome equation substracting sample mean and dividing by standard deviation..
+ 
 
 {title:Saved results}
 
@@ -109,7 +94,8 @@ Default is {bf:gaussian}.
 {synopt:{cmd:e(rank)}}number of parameters{p_end}
 {synopt:{cmd:e(df_r)}}degrees of freedom{p_end}
 {synopt:{cmd:e(rho)}}copula parameter{p_end}
-{synopt:{cmd:e(it)}}number of iterations{p_end}
+{synopt:{cmd:e(kendall)}}Kendall's tau{p_end}
+{synopt:{cmd:e(spearman)}}Spearman's rank correlation{p_end}
 
 {synoptset 20 tabbed}{...}
 {p2col 5 20 24 2: Macros}{p_end}
@@ -119,19 +105,26 @@ Default is {bf:gaussian}.
 {synopt:{cmd:e(cmdline)}}command line{p_end}
 {synopt:{cmd:e(outcome_eq)}}outcome equation{p_end}
 {synopt:{cmd:e(select_eq)}}selection equation{p_end}
-{synopt:{cmd:e(predict)}}predict command name{p_end}
 {synopt:{cmd:e(cmd)}}{cmd:qregsel}{p_end}
+{synopt:{cmd:e(predict)}}predict command name{p_end}
+{synopt:{cmd:e(rescale)}}use of rescale option{p_end}
 {synopt:{cmd:e(title)}}title in estimation output{p_end}
 
 {synoptset 20 tabbed}{...}
 {p2col 5 20 24 2: Matrices}{p_end}
 {synopt:{cmd:e(coefs)}}coefficient matrix. Each column corresponds to the coefficients for a quantile{p_end}
-{synopt:{cmd:e(grid)}}value of the objective function minimized over the grid{p_end}
+{synopt:{cmd:e(grid)}}matrix with the values of the objective function for each value of rho, and its respective Spearman rank correlation and Kendall's tau{p_end}
 
 {synoptset 20 tabbed}{...}
 {p2col 5 20 24 2: Functions}{p_end}
 {synopt:{cmd:e(sample)}}marks estimation sample{p_end}
 {p2colreset}{...}
+
+{title:Examples}
+
+{cmd:. webuse womenwk, clear}
+{cmd:. qregsel wage educ age, select(married children educ age) quantile(.1 .5 .9)}
+{cmd:. ereturn list}
 
 {title:References}
 
