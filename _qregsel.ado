@@ -13,7 +13,7 @@ program define _qregsel, eclass sortpreserve
     version 16.0
 
     syntax varlist(numeric) [if] [in], SELect(string) quantile(string) ///
-	[ copula(string) noCONStant rho(string) egrid(string) ///
+	[ copula(string) NOCONStant rho(string) egrid(string) ///
 	kendall(string) spearman(string) rescale ]
     
     gettoken depvar indepvars : varlist
@@ -34,6 +34,8 @@ program define _qregsel, eclass sortpreserve
 	}		
 	capture unab x_s : `x_s'
 	
+	if ("`noconstant'"!="") local _constant , noconstant
+	
 	
 ********************************************************************************	
 ** Marking the sample to use (selected observations)
@@ -49,12 +51,11 @@ program define _qregsel, eclass sortpreserve
 ********************************************************************************
 ** Generate the propensity score and the instrument	
 ********************************************************************************	
-	tempname pZ varphi1 b N rank df_r it betas_taus grid
+	tempname pZ b N rank df_r it betas_taus grid
 	tempvar copula_cdf
 	mat `grid' = `egrid'
 	qui: probit `y_s' `x_s'
 	qui: predict `pZ'
-	qui: gen `varphi1' = `pZ' if `y_s'==1
 
 
 ********************************************************************************	
@@ -63,8 +64,9 @@ program define _qregsel, eclass sortpreserve
 	if "`rescale'"!="" {
 	preserve
 	foreach lname of local cnames {
-		qui: sum `lname' if `y_s'==1
-		qui: replace `lname' = (`lname'-r(mean))/r(sd)
+		qui: sum `lname' if `touse'
+		qui: replace `lname' = (`lname'-r(mean))/r(sd) if `touse'
+		qui: replace `lname' = . if `touse'==0
 	}
 	}
 	
@@ -126,14 +128,19 @@ local quants = "`quants' `orig'"
 ** Estimate rotated quantile regression using the selected rho
 ********************************************************************************
 local count: word count `indepvars' 
-mat `betas_taus' = J(`count'+1,1,.)
+if "`noconstant'" == "" {
+	mat `betas_taus' = J(`count'+1,1,.)
+}
+else {
+	mat `betas_taus' = J(`count',1,.)
+}
 foreach tau of local quants {
 
 ** Obtain copula
 qui:	mata: copulafn("`pZ'",`rho',`tau',"`touse'","`copula_cdf'","`copula'")
 
 ** Rotated quantile regression
-qui:	mata: mywork("`depvar'", "`cnames'", "`touse'", "`constant'", ///
+qui:	mata: mywork("`depvar'", "`cnames'", "`touse'", "`noconstant'", ///
 	"`b'", "`N'", "`rank'", "`df_r'","`it'","`copula_cdf'")
 qui: cap drop `copula_cdf'
 
@@ -143,7 +150,7 @@ mat `betas_taus' = `betas_taus',`b'
 }
 
 mat `betas_taus' = `betas_taus'[1...,2...]
-    if "`constant'" == "" {
+    if "`noconstant'" == "" {
     	local cnames `cnames' _cons
     }
 matrix rownames `betas_taus' = `cnames'	

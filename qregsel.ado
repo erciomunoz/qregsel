@@ -1,4 +1,5 @@
 *! version 1.2 9September2020
+*! version 1.3 11September2020 - Fix some issues regarding collinearity
 * Authors: Ercio Munoz & Mariel Siravegna 
 
 /* Wrap file to implement copula-based sample selection model in quantile 
@@ -11,13 +12,14 @@ program define qregsel, eclass sortpreserve
     version 16.0
 
     syntax varlist(numeric) [if] [in], SELect(string) quantile(string) ///
-	[ copula(string) noCONStant finergrid rescale]
-    
+	[ copula(string) NOCONStant finergrid rescale]
+	    
     gettoken depvar indepvars : varlist
     _fv_check_depvar `depvar'
 
     fvexpand `indepvars' 
-    local cnames `r(varlist)'
+    local cnames `r(varlist)'	
+	fvexpand `select' 
 	
 	tokenize `select', parse("=")
 	if "`2'" != "=" {
@@ -31,6 +33,7 @@ program define qregsel, eclass sortpreserve
 	}		
 	capture unab x_s : `x_s'
 	
+	if ("`noconstant'"!="") local _constant , noconstant
 	
 ********************************************************************************	
 ** Marking the sample to use (selected observations)
@@ -59,6 +62,26 @@ program define qregsel, eclass sortpreserve
 	
 	
 ********************************************************************************	
+** Checking collinearity
+********************************************************************************	
+
+	qui _rmdcoll `depvar' `indepvars' if `touse' `_constant'
+	local result "`r(varlist)'"
+	local coll_x: list indepvars - result
+	if ~missing("`coll_x'") {
+		noisily display as text "note: `coll_x' omitted from outcome equation because of collinearity"
+		local `indepvars' `result'
+	}
+	qui _rmdcoll `y_s' `x_s'
+	local result "`r(varlist)'"
+	local coll_x: list x_s - result
+	if ~missing("`coll_x'") {
+		noisily display as text "note: `coll_x' omitted from selection equation because of colliearity"
+		local x_s `result'
+	}
+	
+	
+********************************************************************************	
 ** Checking errors with copula specification (default is gaussian)
 ********************************************************************************	
 	if "`copula'" == "" {
@@ -73,11 +96,10 @@ program define qregsel, eclass sortpreserve
 ********************************************************************************
 ** Generate the propensity score and the instrument	
 ********************************************************************************	
-	tempname pZ varphi1 b N rank df_r it obj_j index object betas_taus rhos x_grid grid
+	tempname pZ b N rank df_r it obj_j index object betas_taus rhos x_grid grid
 	tempvar copula_cdf
 	qui: probit `y_s' `x_s'
-	qui: predict `pZ'
-	qui: gen `varphi1' = `pZ' if `y_s'==1
+	qui: predict `pZ' 
 
 	
 ********************************************************************************	
@@ -86,8 +108,9 @@ program define qregsel, eclass sortpreserve
 	if "`rescale'"!="" {
 	preserve
 	foreach lname of local cnames {
-		qui: sum `lname' if `y_s'==1
-		qui: replace `lname' = (`lname'-r(mean))/r(sd)
+		qui: sum `lname' if `touse'
+		qui: replace `lname' = (`lname'-r(mean))/r(sd) if `touse'
+		qui: replace `lname' = . if `touse'==0
 	}
 	}	
 
@@ -148,12 +171,12 @@ local tau = `k'/10
 qui:	mata: copulafn("`pZ'",`rhoa',`tau',"`touse'","`copula_cdf'","`copula'")
 
 ** Rotated quantile regression
-qui:	mata: mywork("`depvar'", "`cnames'", "`touse'", "`constant'", ///
+qui:	mata: mywork("`depvar'", "`cnames'", "`touse'", "`noconstant'", ///
 	"`b'", "`N'", "`rank'", "`df_r'","`it'","`copula_cdf'")
 
 ** Obtain value for the grid to be minimized
 qui:	mata: objective("`pZ'",`rhoa',`tau',"`touse'", ///
- 	"`depvar'", "`cnames'", "`constant'","`obj_j'","`b'","`copula_cdf'")	
+ 	"`depvar'", "`cnames'", "`noconstant'","`obj_j'","`b'","`copula_cdf'")	
 qui: cap drop `copula_cdf'
 local obj = `obj'+`obj_j'
 }
@@ -227,7 +250,13 @@ local quants = "`quants' `orig'"
 ** Estimate rotated quantile regression using the selected rho
 ********************************************************************************
 local count: word count `indepvars' 
-mat `betas_taus' = J(`count'+1,1,.)
+if "`noconstant'" == "" {
+	mat `betas_taus' = J(`count'+1,1,.)
+}
+else {
+	mat `betas_taus' = J(`count',1,.)
+}
+
 foreach tau of local quants {
 local rho = `x_grid'[`index_min',1]
 
@@ -235,7 +264,7 @@ local rho = `x_grid'[`index_min',1]
 qui:	mata: copulafn("`pZ'",`rho',`tau',"`touse'","`copula_cdf'","`copula'")
 
 ** Rotated quantile regression
-qui:	mata: mywork("`depvar'", "`cnames'", "`touse'", "`constant'", ///
+qui:	mata: mywork("`depvar'", "`cnames'", "`touse'", "`noconstant'", ///
 	"`b'", "`N'", "`rank'", "`df_r'","`it'","`copula_cdf'")
 qui: cap drop `copula_cdf'
 
@@ -245,7 +274,7 @@ mat `betas_taus' = `betas_taus',`b'
 }
 
 mat `betas_taus' = `betas_taus'[1...,2...]
-    if "`constant'" == "" {
+    if "`noconstant'" == "" {
     	local cnames `cnames' _cons
     }
 matrix rownames `betas_taus' = `cnames'	
