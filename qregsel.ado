@@ -1,5 +1,8 @@
-*! version 1.2 9September2020
+*! version 1.1 1April2020
+*! version 1.2 9September2020 - Simplifies syntax and changes how the estimation is done
 *! version 1.3 11September2020 - Fix some issues regarding collinearity
+*! version 1.4 22September2020 - Fix issue with the syntax in the selection eq.
+*! version 1.5 3March2021 - Added progress' dots, simplify the code and speed it up
 * Authors: Ercio Munoz & Mariel Siravegna 
 
 /* Wrap file to implement copula-based sample selection model in quantile 
@@ -7,25 +10,23 @@ regression as suggested by Arellano and Bonhomme (2017). */
 
 * qregsel wage educ age, quantile(.1 .5 .9) select(married children educ age) 
 
-cap program drop qregsel
 program define qregsel, eclass sortpreserve
-    version 16.0
+    version 15.0
 
     syntax varlist(numeric) [if] [in], SELect(string) quantile(string) ///
-	[ copula(string) NOCONStant finergrid rescale]
-	    
+	[ copula(string) NOCONStant finergrid coarsergrid rescale nodots ]
+	    	
     gettoken depvar indepvars : varlist
     _fv_check_depvar `depvar'
 
     fvexpand `indepvars' 
     local cnames `r(varlist)'	
-	fvexpand `select' 
 	
 	tokenize `select', parse("=")
 	if "`2'" != "=" {
 		local x_s `select'
 		tempvar y_s
-		qui gen `y_s' = (`depvar'!=.)
+		qui gen byte `y_s' = (`depvar'!=.) `if' `in'
 	}
 	else {
 		local y_s `1'
@@ -36,14 +37,20 @@ program define qregsel, eclass sortpreserve
 	if ("`noconstant'"!="") local _constant , noconstant
 	
 ********************************************************************************	
-** Marking the sample to use (selected observations)
+** Marking the samples to use 
 ********************************************************************************	
-	marksample touse
-	markout `touse' `y_s' `x_s'
-	tempvar touse1
-	mark `touse1' if `y_s'==1
-	markout `touse1' `depvar' `indepvars'
-	qui replace `touse' = 0 if `touse1'==0 & `y_s'==1 
+	tempvar touse_all touse
+	mark `touse_all' `if' `in' 
+	markout `touse_all' `indepvars' `x_s' 
+
+	qui gen byte `touse' = `touse_all'
+	markout `touse' `depvar' `indepvars' 
+	qui replace `touse' = 0 if `y_s'==1 & `touse'!=1
+
+	qui count if `touse_all'
+	local all = r(N)
+	qui count if `touse'
+	local N_selected = r(N)
 
 	
 ********************************************************************************	
@@ -51,12 +58,12 @@ program define qregsel, eclass sortpreserve
 ********************************************************************************	
 	qui tab `y_s' 
 	if r(r) != 2 {
-	dis as error "`y_s' should be binary."
+	dis as error "Dependent variable never censored because of selection or selection indicator is not binary."
 	exit 198 
 	}
 	qui sum `y_s' 
 	if r(max) != 1 & r(min) != 0 {
-	dis as error "`y_s' should be either 0 or 1."
+	dis as error "Dependent variable never censored because of selection or selection indicator is not binary."
 	exit 198
 	}
 	
@@ -64,7 +71,6 @@ program define qregsel, eclass sortpreserve
 ********************************************************************************	
 ** Checking collinearity
 ********************************************************************************	
-
 	qui _rmdcoll `depvar' `indepvars' if `touse' `_constant'
 	local result "`r(varlist)'"
 	local coll_x: list indepvars - result
@@ -72,7 +78,8 @@ program define qregsel, eclass sortpreserve
 		noisily display as text "note: `coll_x' omitted from outcome equation because of collinearity"
 		local `indepvars' `result'
 	}
-	qui _rmdcoll `y_s' `x_s'
+	cap qui _rmdcoll `y_s' `x_s'
+	if (_rc!=0) display as error "Check the syntax in the selection equation"
 	local result "`r(varlist)'"
 	local coll_x: list x_s - result
 	if ~missing("`coll_x'") {
@@ -93,117 +100,17 @@ program define qregsel, eclass sortpreserve
 	}
 	
 	
-********************************************************************************
-** Generate the propensity score and the instrument	
-********************************************************************************	
-	tempname pZ b N rank df_r it obj_j index object betas_taus rhos x_grid grid
-	tempvar copula_cdf
-	qui: probit `y_s' `x_s'
-	qui: predict `pZ' 
-
-	
-********************************************************************************	
-** Rescale the variables
-********************************************************************************
-	if "`rescale'"!="" {
-	preserve
-	foreach lname of local cnames {
-		qui: sum `lname' if `touse'
-		qui: replace `lname' = (`lname'-r(mean))/r(sd) if `touse'
-		qui: replace `lname' = . if `touse'==0
-	}
-	}	
-
-	
-********************************************************************************
-** Estimate rho looping over quantiles and the grid for rho	
-********************************************************************************		
-
-if "`finergrid'" == "" {
-    
-if ("`copula'" == "frank") mata: coarsergrid("frank","`grid'")
-if ("`copula'" == "gaussian") mata: coarsergrid("gaussian","`grid'")
-local grid_rho = 100
-mat `object' = J(`grid_rho',1,0)
-mat `x_grid' = J(`grid_rho',1,0)
-#delimit ;
-mat rownames `object' = 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22
-23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49
-50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76
-77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94 95 96 97 98 99 100;
-#delimit cr
-
-}
-else {
-
-if ("`copula'" == "frank") mata: grid("frank","`grid'")
-if ("`copula'" == "gaussian") mata: grid("gaussian","`grid'")
-local grid_rho = 199
-mat `object' = J(`grid_rho',1,0)
-mat `x_grid' = J(`grid_rho',1,0)    
-#delimit ;
-mat rownames `object' = 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22
-23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49
-50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76
-77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94 95 96 97 98 99 100 101 102
-103 104 105 106 107 108 109 110 111 112 113 114 115 116 117 118 119 120 121 122 
-123 124 125 126 127 128 129 130 131 132 133 134 135 136 137 138 139 140 141 142 
-143 144 145 146 147 148 149 150 151 152 153 154 155 156 157 158 159 160 161 162 
-163 164 165 166 167 168 169 170 171 172 173 174 175 176 177 178 179 180 181 182 
-183 184 185 186 187 188 189 190 191 192 193 194 195 196 197 198 199;
-#delimit cr    
-
-}
-
-local j = 1
-forvalues g=1(1)`grid_rho' {
-
-local rhoa = `grid'[`g',1]
-mat `x_grid'[`j',1] = `rhoa'
-
-local obj = 0
-
-* Loop over 9 quantiles to compute values of the grid to be minimized
-forvalues k = 1(1)9 {
-local tau = `k'/10
-
-** Obtain copula
-qui:	mata: copulafn("`pZ'",`rhoa',`tau',"`touse'","`copula_cdf'","`copula'")
-
-** Rotated quantile regression
-qui:	mata: mywork("`depvar'", "`cnames'", "`touse'", "`noconstant'", ///
-	"`b'", "`N'", "`rank'", "`df_r'","`it'","`copula_cdf'")
-
-** Obtain value for the grid to be minimized
-qui:	mata: objective("`pZ'",`rhoa',`tau',"`touse'", ///
- 	"`depvar'", "`cnames'", "`noconstant'","`obj_j'","`b'","`copula_cdf'")	
-qui: cap drop `copula_cdf'
-local obj = `obj'+`obj_j'
-}
-
-mat `object'[`j',1] = `obj'*`obj'
-local j=`j'+1
-}
-
-** Minimize the objective function
-qui: mata: minmatrix("`object'","`index'")	
-local index_min = `index'[1,1]
-
-mat `object' = `grid',`object'
-mat colnames `object' = rho spearman kendall value
-
-
 ********************************************************************************	
 ** Checking errors in the quantiles requested
 ********************************************************************************
-tokenize `quantile'
-local orig `1'
-macro shift
+	tokenize `quantile'
+	local orig `1'
+	macro shift
 if "`orig'" == "" {
 	di in red "option quantile() required"
 	exit 198
 }
-capture confirm number `orig'
+	capture confirm number `orig'
 if _rc {
 	di "`orig' not a number"
 	exit 198
@@ -216,16 +123,16 @@ if `orig'<=0 | `orig' >=1 {
 	di "`orig' out of range"
 	exit 198
 }
-local quants = `orig'
+	local quants = `orig'
 
 while "`1'" != "" {
-local orig `1'
-macro shift
+	local orig `1'
+	macro shift
 if "`orig'" == "" {
 	di in red "option quantile() required"
 	exit 198
 }
-capture confirm number `orig'
+	capture confirm number `orig'
 if _rc {
 	di "`orig' not a number"
 	exit 198
@@ -242,75 +149,144 @@ if `orig'<=0 {
 	di "`orig' out of range"
 	exit 198
 }
-local quants = "`quants' `orig'"
+	local quants = "`quants' `orig'"
 }
+
+	
+********************************************************************************
+** Generate the propensity score and the instrument	
+********************************************************************************	
+	tempname pZ grid object y X R M N k index copula_p b betas_taus coefs value gridsize obj
+	qui: probit `y_s' `x_s' if `touse_all'
+	qui: predict `pZ' if `touse_all'
+
+	
+********************************************************************************
+** Estimate rho looping over quantiles and the grid for rho	
+********************************************************************************		
+if "`finergrid'" == "finergrid" & "`coarsergrid'" != "coarsergrid" { 
+	if ("`copula'" == "frank") mata: `grid' = finergrid("frank")
+	if ("`copula'" == "gaussian") mata: `grid' = finergrid("gaussian")
+}
+else if "`coarsergrid'" == "coarsergrid" {
+	if ("`copula'" == "frank") mata: `grid' = coarsergrid("frank")
+	if ("`copula'" == "gaussian") mata: `grid' = coarsergrid("gaussian")
+}
+else {
+	if ("`copula'" == "frank") mata: `grid' = regulargrid("frank")
+	if ("`copula'" == "gaussian") mata: `grid' = regulargrid("gaussian")
+}
+	mata: st_matrix("`object'",`grid')
+
+
+********************************************************************************	
+* Send data to mata 
+********************************************************************************
+	mata: `y' = st_data(., "`depvar'", "`touse'")
+	mata: `X' = st_data(., "`cnames'", "`touse'")
+
+if ("`rescale'" != "") {
+	mata:	`R'    = meanvariance(`X')
+	mata:	`X' = (`X':-`R'[1,.]):/sqrt(diagonal(`R'[2::rows(`R'),]))'
+}
+
+	mata: `M'    = rows(`X')
+	mata: `N'    = cols(`X')
+
+if ("`noconstant'"=="") mata: `X' = `X',J(`M',1,1)
+	mata: `k'    = cols(`X') 
+	mata: st_numscalar("`k'",`k')
+
+	mata: `pZ' = st_data(.,"`pZ'", "`touse'") 
+
+
+********************************************************************************	
+* Grid search
+********************************************************************************
+	mata: st_numscalar("`gridsize'",rows(`grid'))
+	mat `value' = J(`gridsize',1,.)
+	local gridsize = `gridsize'
+forvalues g = 1(1)`gridsize' {
+	mata: `obj' = maxrho(`pZ',`y',`X',`M',`N',`grid',"`copula'",`g')
+	mata: st_numscalar("`obj'",`obj')
+	mat `value'[`g',1] = `obj'
+
+if "`nodots'"=="" {
+    if `g'==1 {
+	display "Grid for the copula parameter (`gridsize')"  
+	display "----+--- 1 ---+--- 2 ---+--- 3 ---+--- 4 ---+--- 5"
+	}
+	if !inlist(`g',50,100,150,200)  di "." _cont 
+	if inlist(`g',50,100,150,200) di "." _cont _newline  
+}
+
+}
+	mata: `value' = st_matrix("`value'")
+	mata: `index' = select((1::rows(`value')), (`value' :== min(`value'')))
+	mata: st_numscalar("`index'",`index')
 
 
 ********************************************************************************	
 ** Estimate rotated quantile regression using the selected rho
 ********************************************************************************
-local count: word count `indepvars' 
-if "`noconstant'" == "" {
-	mat `betas_taus' = J(`count'+1,1,.)
-}
-else {
-	mat `betas_taus' = J(`count',1,.)
-}
+	local rho      = `object'[`index',1]
+	local spearman = `object'[`index',2]
+	local kendall  = `object'[`index',3]
+	mat `object' = `object',`value'
+	mat colnames `object' = rho spearman kendall value
+
+	local count: word count `indepvars' 
+if ("`noconstant'" == "") mat `coefs' = J(`count'+1,1,.)
+else if ("`noconstant'" != "") mat `coefs' = J(`count',1,.)
 
 foreach tau of local quants {
-local rho = `x_grid'[`index_min',1]
 
-** Obtain copula
-qui:	mata: copulafn("`pZ'",`rho',`tau',"`touse'","`copula_cdf'","`copula'")
+	mata: `copula_p' = copulafn(`pZ',`rho',`tau',"`copula'") 	
+	mata: `b'        = mywork(`y',`X',`pZ',`rho',`tau',`copula_p',`M',`N')  
 
-** Rotated quantile regression
-qui:	mata: mywork("`depvar'", "`cnames'", "`touse'", "`noconstant'", ///
-	"`b'", "`N'", "`rank'", "`df_r'","`it'","`copula_cdf'")
-qui: cap drop `copula_cdf'
-
-local qtau = 100*`tau'
-mat colnames `b' = "q`qtau'"
-mat `betas_taus' = `betas_taus',`b'
+	local qtau = round(100*`tau')
+   if ("`noconstant'" == "") local cnames2 `cnames' _cons
+   else if ("`noconstant'" != "") local cnames2 `cnames' 
+	local names = ""
+	foreach lname2 of local cnames2   {
+		local names = "`names' q`qtau':`lname2'"
+	}
+	mata st_matrix("`b'", `b')
+	mat rownames `b' = `names' 	
+	mat `betas_taus'  = ( nullmat(`betas_taus') \ `b')  
+	mat colnames `b' = "q`qtau'"
+	mat `coefs' = `coefs',`b'
 }
 
-mat `betas_taus' = `betas_taus'[1...,2...]
-    if "`noconstant'" == "" {
-    	local cnames `cnames' _cons
-    }
-matrix rownames `betas_taus' = `cnames'	
+	mat `coefs' = `coefs'[1...,2...]
+	if ("`noconstant'" == "") local cnames `cnames' _cons
+	matrix rownames `coefs' = `cnames'	
 
-local kendall = `object'[`index_min',3]
-local spearman = `object'[`index_min',2]
-
-
-********************************************************************************	
-** Rescale the variables
-********************************************************************************
-	if "`rescale'"!="" {
-		restore
-	    local rescale = "rescaled"
-	}
-	else {
-	    local rescale = "non-rescaled"
-	}
-	
 
 ********************************************************************************	
 ** Generating the output
-********************************************************************************	
+********************************************************************************
+	if ("`rescale'"!="") local rescale = "rescaled"
+	else if ("`rescale'"=="") local rescale = "non-rescaled"
+	
 	dis " "
 	dis in green "Quantile selection model" ///
-		_column (50) "Number of obs" _column(69) "=" _column(71) %8.0f in yellow `N'
-
-    ereturn post , esample(`touse') buildfvinfo
-	ereturn matrix grid    = `object'
-    ereturn matrix coefs   = `betas_taus'
-    ereturn scalar N       = `N'
-	ereturn scalar rank    = `rank'
-    ereturn scalar df_r    = `df_r'
-    ereturn scalar rho     = `rho'
-	ereturn scalar kendall  = `kendall'
-	ereturn scalar spearman = `spearman'
+		_column (50) "Number of obs" _column(69) "=" _column(71) %8.0f in yellow `all'
+	dis in green	_column (50) "Selected"      _column(69) "=" _column(71) %8.0f in yellow `N_selected'
+	dis in green	_column (50) "Nonselected"   _column(69) "=" _column(71) %8.0f in yellow `all'-`N_selected'	
+	
+	dis in green "Copula parameter (`copula'): " %8.2f in yellow `rho'	
+		
+	tempname b
+	matrix `b' = `betas_taus''
+    ereturn post `b', esample(`touse_all') buildfvinfo
+	ereturn matrix coefs      = `coefs'
+	ereturn matrix grid       = `object'
+	ereturn scalar N          = `all'
+	ereturn scalar N_selected = `N_selected'
+    ereturn scalar rho        = `rho'
+	ereturn scalar kendall    = `kendall'
+	ereturn scalar spearman   = `spearman'
 	ereturn local title   "Quantile selection model"
 	ereturn local rescale "`rescale'"
 	ereturn local predict "qregsel_p"
@@ -323,7 +299,6 @@ local spearman = `object'[`index_min',2]
 	ereturn local copula "`copula'"
 
     ereturn display
-	matlist e(coefs)
 	
 end
 
@@ -332,48 +307,77 @@ end
 ********************************************************************************
 mata:
 
-void copulafn( string scalar pscore, numeric vector rho,
-			   numeric vector tau,	 string scalar touse,   
-			   string scalar cdf,    string scalar name) 
+real scalar maxrho(real matrix pZ1,
+					real matrix y, 
+					real matrix X, 
+					real scalar M, 
+					real scalar N,
+					real matrix grid,
+					string scalar copula,
+					real scalar j) 
 {
 
-    real matrix pZ1, G, vs, v1
+real vector copula_p, b
+real scalar rhoa, obj, obj2, gridsize
 
-    pZ1  = st_data(., pscore, touse)
+gridsize = rows(grid)
+rhoa = grid[j,1]
+
+obj = 0
+for (i=1; i<=9; i++) {
+copula_p  = copulafn(pZ1,rhoa,i/10,copula) 	
+b         = mywork(y,X,pZ1,rhoa,i/10,copula_p,M,N)    
+obj2      = objective(pZ1,y,X,b,copula_p)	
+obj = obj + obj2
+}
+obj = obj*obj
+return(obj)
+}
+
+real matrix bound(numeric matrix x, numeric matrix dx) 
+{
+
+	real vector b, f
 	
+	b = 1e20 :+ 0* x 
+	f = selectindex(dx:<0) 
+	b[f] = -x[f] :/ dx[f] 
+
+	return(b)
+}
+
+real vector copulafn(real vector pZ1, 
+						numeric vector rho,
+						numeric vector tau,	 
+						string scalar name) 
+{
+	real vector G,vs,v1
+
 	if (name=="gaussian") {
 	vs = J(rows(pZ1),1,invnormal(tau))
 	v1 = invnormal(pZ1)
-	st_view(G, ., st_addvar("float", cdf),touse)
-	G[.,.] = binormal(vs,v1,rho) :/ pZ1
+	G  = binormal(vs,v1,rho) :/ pZ1
 	}
 	else {
-	st_view(G, ., st_addvar("float", cdf),touse)
-	G[.,.] = -ln(1:+(exp(-rho*tau):-1):*(exp(-rho:*pZ1):-1):/(exp(-rho)-1)):/(rho:*pZ1)
+	G = -ln(1:+(exp(-rho*tau):-1):*(exp(-rho:*pZ1):-1):/(exp(-rho)-1)):/(rho:*pZ1)
 	}
-		
+	
+	return(G)		
 }
 
-void mywork( string scalar depvar,  	string scalar indepvars, 
-             string scalar touse,   	string scalar constant,  
-			 string scalar bname,       string scalar nname,   
-			 string scalar rname,       string scalar dfrname, 
-			 string scalar itname, 		string scalar cdf) 
+real vector mywork(real vector y,
+					real matrix X,   
+					real vector pZ1,     
+					numeric vector rho,
+					real vector tau,	         
+					real matrix p,
+					real scalar M,
+					real scalar N) 
 {
-    real vector y, p
-    real matrix X, u, a, b, A, x
-    real scalar m, n, k, it
-
-    y    = st_data(., depvar, touse)
-    X    = st_data(., indepvars, touse)
- 	p    = st_data(., cdf, touse) 
+    real vector yy, bb
+    real matrix u, a, b, A, x, G
+    real scalar m, n, k, it, beta, small, max_it
 	
-	M    = rows(X)
-	N    = cols(X)
-	
-    if (constant == "") {
-    X    = X,J(M,1,1)
-    }
 	k    = cols(X) 
 	
 	u    = J(M, 1, 1)
@@ -393,12 +397,12 @@ void mywork( string scalar depvar,  	string scalar indepvars,
 
 // Generate initial feasible point 
 	s = u - x  
-	y = svsolve(A',c')'
-	r = c - y * A
+	yy = svsolve(A',c')'
+	r = c - yy * A
 	r = mm_cond(r:==0,r:+0.001,r)  
 	z = mm_cond(r:>0,r,0)
 	w = z - r
-	gap = c * x - y * b + w * u
+	gap = c * x - yy * b + w * u
 
 // Start iterations
 	it = 0
@@ -408,111 +412,88 @@ while (gap > small & it < max_it) {
 // Compute affine step
     q = 1 :/ (z' :/ x + w' :/ s)
     r = z - w
-    Q = SPMATbandedmake(diag(sqrt(q)),0,0)
-    AQ = SPMATbandedmultfull(Q,0,0,A')'
-	rhs = SPMATbandedmultfull(Q,0,0,r')
-    dy = (svsolve(AQ',rhs))'
+	AQ = J(k,n,0)
+	for (i=1;i<=n;i++) {
+		for (j=1;j<=k;j++) {
+			AQ[j,i] = q[i,1]*A[j,i]
+		}
+	}		
+	AQA = AQ * A' 
+	rhs = AQ * r' 
+	dy = (invsym(AQA) * rhs)'
     dx = q :* (dy * A - r)'
     ds = -dx
     dz = -z :* (1 :+ dx :/ x)'
     dw = -w :* (1 :+ ds :/ s)'
 
 // Compute maximum allowable step lengths
-    fx = mm_cond(dx:<0,-x:/dx,1e20 :+ 0 :* x)
-    fs = mm_cond(ds:<0,-s:/ds,1e20 :+ 0 :* s)
-    fw = mm_cond(dw:<0,-w:/dw,1e20 :+ 0 :* w)
-    fz = mm_cond(dz:<0,-z:/dz,1e20 :+ 0 :* z)
-    fp = mm_cond(fx:<fs,fx,fs) 
-	fd = mm_cond(fw:<fz,fw,fz)
-	fp = mm_cond(min(beta * fp):<1,min(beta * fp),1) 
-	fd = mm_cond(min(beta * fd):<1,min(beta * fd),1) 
+	fx = bound(x, dx) 
+	fs = bound(s, ds) 
+	fw = bound(w, dw) 
+	fz = bound(z, dz) 
+	fp = rowmin((fx,fs)) 
+	fd = colmin((fw \ fz)) 
+	fp = min((min(beta * fp), 1)) 
+	fd = min((min(beta * fd), 1)) 
 	
 if (mm_cond(fp:<fd,fp,fd) < 1) {
     
 // Update mu
-      mu = z * x + w * s
-      g = (z + fd * dz) * (x + fp * dx) + (w + fd * dw) * (s + fp * ds)
-      mu = mu * (g / mu) ^3 / ( 2 * n)
+    mu = z * x + w * s
+    g = (z + fd * dz) * (x + fp * dx) + (w + fd * dw) * (s + fp * ds)
+    mu = mu * (g / mu) ^3 / ( 2 * n)
 
 // Compute modified step
-      dxdz = dx :* dz'
-      dsdw = ds :* dw'
-      xinv = 1 :/ x
-      sinv = 1 :/ s
-      xi = mu * (xinv - sinv)
-	  rhs = rhs + SPMATbandedmultfull(Q,0,0,( dxdz - dsdw -xi ))
-	  dy = (svsolve(AQ',rhs))'
-      dx = q :* (A' * dy' + xi - r' -dxdz + dsdw)
-      ds = -dx
-      dz = mu * xinv' - z - xinv' :* z :* dx' - dxdz'
-      dw = mu * sinv' - w - sinv' :* w :* ds' - dsdw'
+	dxdz = dx :* dz'
+	dsdw = ds :* dw'
+	xinv = 1 :/ x
+	sinv = 1 :/ s
+	xi = mu * (xinv - sinv)
+	rhs = rhs + A * ( q :* (dxdz - dsdw - xi)) 
+	dy = (invsym(AQA)* rhs)' 
+	dx = q :* (A' * dy' + xi - r' -dxdz + dsdw)
+	ds = -dx
+	dz = mu * xinv' - z - xinv' :* z :* dx' - dxdz'
+	dw = mu * sinv' - w - sinv' :* w :* ds' - dsdw'
 
 // Compute maximum allowable step lengths
-      fx = mm_cond(dx:<0,-x:/dx,1e20 :+ 0 :* x)
-      fs = mm_cond(ds:<0,-s:/ds,1e20 :+ 0 :* s)
-      fw = mm_cond(dw:<0,-w:/dw,1e20 :+ 0 :* w)
-      fz = mm_cond(dz:<0,-z:/dz,1e20 :+ 0 :* z)
-	  fp = mm_cond(fx:<fs,fx,fs) 
-	  fd = mm_cond(fw:<fz,fw,fz)
-	  fp = mm_cond(min(beta * fp):<1,min(beta * fp),1) 
-	  fd = mm_cond(min(beta * fd):<1,min(beta * fd),1) 
+	fx = bound(x, dx) 
+	fs = bound(s, ds) 
+	fw = bound(w, dw) 
+	fz = bound(z, dz) 
+	fp = rowmin((fx,fs)) 
+	fd = colmin((fw\ fz)) 
+	fp = min((min(beta * fp), 1)) 
+	fd = min((min(beta * fd), 1)) 
 }
 
 // Take the step
     x = x + fp * dx
     s = s + fp * ds
-    y = y + fd * dy
+    yy = yy + fd * dy
     w = w + fd * dw
     z = z + fd * dz
-    gap = c * x - y * b + w * u
+    gap = c * x - yy * b + w * u
 }
 	
-    st_matrix(bname, -y')
-    st_numscalar(itname, it)
-    st_numscalar(nname, M)
-    st_numscalar(rname, k)
-    st_numscalar(dfrname, M-k)
-	
+// Return vector of estimates
+	bb = -yy'
+	return(bb)		
 }
 
-void objective( string scalar pscore, 	numeric vector rhoa,
-				numeric vector tau, 	string scalar touse,   
-				string scalar depvar,   string scalar indepvars, 
-				string scalar constant, string scalar G2, 
-				string scalar betas   , string scalar G1		) 
+real scalar objective(real vector varphi1, 	
+						real vector y,  
+						real matrix X, 
+						real matrix b,
+						real vector copula_p) 
 {
-
-    real matrix varphi1, pZ1, G, y, X, b
-	real scalar n
-	
-	y    = st_data(., depvar, touse)
-    X    = st_data(., indepvars, touse)
-	varphi1  = st_data(., pscore, touse)
-	pZ1  = st_data(., pscore, touse)'
-    n    = rows(X)
-	b = st_matrix(betas)'
-	copula_p = st_data(., G1, touse)
-
-    if (constant == "") {
-        X    = X,J(n,1,1)
-    }
-	
-	st_numscalar(G2, mean( varphi1 :* ((y:<=X*b'):-copula_p) ))
-	
+	real scalar obj
+			
+	obj = mean( varphi1 :* ((y:<=X*b):-copula_p) )
+	return(obj)
 }
 
-void minmatrix(string scalar obj, string scalar G2) 
-{
-    real matrix values, i, w
-	values = st_matrix(obj)
-	i = J(0,0,.)
-	w = J(0,0,.)
-	minindex(values,1,i,w)
-	st_matrix(G2, i)
-	
-}
-
-void grid(string scalar copula, string scalar values)
+real matrix finergrid(string scalar copula)
 {
     
 real matrix frank_spearman, frank_rho, frank_kendall, frank, gaussian_spearman, gaussian_rho, gaussian_kendall, gaussian
@@ -1722,15 +1703,15 @@ gaussian_kendall=-0.909893173\
 gaussian = gaussian_rho,gaussian_spearman,gaussian_kendall
 
 if (copula=="gaussian") {
-	st_matrix(values, gaussian)
+	return(gaussian)
 }
 else {
-    st_matrix(values, frank)
+    return(frank)
 }
 
 }
 
-void coarsergrid(string scalar copula, string scalar values)
+real matrix regulargrid(string scalar copula)
 {
     
 real matrix frank_spearman, frank_rho, frank_kendall, frank, gaussian_spearman, gaussian_rho, gaussian_kendall, gaussian
@@ -2347,10 +2328,336 @@ gaussian_kendall= -0.909893173\
 gaussian = gaussian_rho,gaussian_spearman,gaussian_kendall
 
 if (copula=="gaussian") {
-	st_matrix(values, gaussian)
+	return(gaussian)
 }
 else {
-    st_matrix(values, frank)
+    return(frank)
+}
+
+}
+
+real matrix coarsergrid(string scalar copula)
+{
+    
+real matrix frank_spearman, frank_rho, frank_kendall, frank, gaussian_spearman, gaussian_rho, gaussian_kendall, gaussian
+	
+frank_spearman = -0.990000412\
+-0.950003857\
+-0.910005355\
+-0.870000579\
+-0.830012728\
+-0.790027662\
+-0.75000917\
+-0.710047337\
+-0.670055967\
+-0.630022828\
+-0.590065232\
+-0.550079911\
+-0.510102969\
+-0.47009768\
+-0.430033259\
+-0.390097294\
+-0.350115566\
+-0.310066017\
+-0.270000625\
+-0.230077249\
+-0.190109613\
+-0.150018153\
+-0.110021534\
+-0.070001409\
+-0.030153497\
+0.00999952\
+0.049940105\
+0.089981487\
+0.129933512\
+0.169925824\
+0.209907923\
+0.249964952\
+0.289997291\
+0.329883234\
+0.369884398\
+0.409905176\
+0.449916651\
+0.489919909\
+0.529906542\
+0.569914074\
+0.609945031\
+0.649967793\
+0.689940972\
+0.729968627\
+0.769982284\
+0.809999402\
+0.849986652\
+0.889990296\
+0.929999034\
+0.96999982
+
+frank_rho = -42.88899994\
+-18.20499992\
+-13.04599953\
+-10.46199989\
+-8.81799984\
+-7.638000011\
+-6.725999832\
+-5.986999989\
+-5.364999771\
+-4.827000141\
+-4.353000164\
+-3.927000046\
+-3.539000034\
+-3.180999994\
+-2.846999884\
+-2.53399992\
+-2.236999989\
+-1.952999949\
+-1.679999948\
+-1.417000055\
+-1.161000013\
+-0.910000026\
+-0.663999975\
+-0.421000004\
+-0.180999994\
+0.059999999\
+0.300000012\
+0.541999996\
+0.786000013\
+1.034000039\
+1.286999941\
+1.547000051\
+1.815000057\
+2.092000008\
+2.381999969\
+2.687000036\
+3.00999999\
+3.355000019\
+3.726999998\
+4.132999897\
+4.581999779\
+5.085999966\
+5.662000179\
+6.337999821\
+7.15500021\
+8.18500042\
+9.562000275\
+11.58300018\
+15.07699966\
+24.04100037
+
+
+frank_kendall= -0.910312974\
+-0.800133184\
+-0.732051168\
+-0.677766417\
+-0.630926698\
+-0.588801724\
+-0.549916787\
+-0.513490511\
+-0.478876683\
+-0.445678145\
+-0.413708046\
+-0.382670228\
+-0.352430374\
+-0.322832133\
+-0.293750117\
+-0.265232984\
+-0.237082582\
+-0.209223141\
+-0.181637953\
+-0.154387045\
+-0.127300027\
+-0.100285418\
+-0.07345491\
+-0.046695118\
+-0.020104526\
+0.006666427\
+0.03330338\
+0.060046189\
+0.086799395\
+0.113682432\
+0.140696031\
+0.167935238\
+0.195373183\
+0.222969654\
+0.250955592\
+0.279323175\
+0.308118846\
+0.337421908\
+0.367320281\
+0.397957918\
+0.429482875\
+0.462056241\
+0.495885386\
+0.531389544\
+0.568978075\
+0.609361742\
+0.653608262\
+0.703704624\
+0.763640484\
+0.845001796
+
+
+frank = frank_rho,frank_spearman,frank_kendall
+
+gaussian_spearman= -0.99\
+-0.95\
+-0.91\
+-0.87\
+-0.83\
+-0.79\
+-0.75\
+-0.71\
+-0.67\
+-0.63\
+-0.59\
+-0.55\
+-0.51\
+-0.47\
+-0.43\
+-0.39\
+-0.35\
+-0.31\
+-0.27\
+-0.23\
+-0.19\
+-0.15\
+-0.11\
+-0.07\
+-0.03\
+0.01\
+0.05\
+0.09\
+0.13\
+0.17\
+0.21\
+0.25\
+0.29\
+0.33\
+0.37\
+0.41\
+0.45\
+0.49\
+0.53\
+0.57\
+0.61\
+0.65\
+0.69\
+0.73\
+0.77\
+0.81\
+0.85\
+0.89\
+0.93\
+0.97
+
+gaussian_rho= -0.990917337\
+-0.954317521\
+-0.917299109\
+-0.87987834\
+-0.842071627\
+-0.803895553\
+-0.765366865\
+-0.726502461\
+-0.687319389\
+-0.647834836\
+-0.608066122\
+-0.568030689\
+-0.5277461\
+-0.487230024\
+-0.446500232\
+-0.405574591\
+-0.364471051\
+-0.323207642\
+-0.281802464\
+-0.240273678\
+-0.198639499\
+-0.156918191\
+-0.115128054\
+-0.073287417\
+-0.031414635\
+0.010471928\
+0.052353897\
+0.094212901\
+0.136030581\
+0.177788594\
+0.219468622\
+0.261052384\
+0.30252164\
+0.343858201\
+0.385043933\
+0.426060773\
+0.466890728\
+0.507515889\
+0.547918437\
+0.58808065\
+0.627984912\
+0.667613718\
+0.706949688\
+0.745975565\
+0.784674233\
+0.823028717\
+0.861022194\
+0.898637997\
+0.935859629\
+0.972670761
+
+gaussian_kendall= -0.909893173\
+-0.797834752\
+-0.727837239\
+-0.671762661\
+-0.623319311\
+-0.579839017\
+-0.539893088\
+-0.50261017\
+-0.467411831\
+-0.43389025\
+-0.401744536\
+-0.370744589\
+-0.340709219\
+-0.311492184\
+-0.28297289\
+-0.255049993\
+-0.227636835\
+-0.200658117\
+-0.174047409\
+-0.147745242\
+-0.121697602\
+-0.09585474\
+-0.070170173\
+-0.044599858\
+-0.019101459\
+0.006366304\
+0.031844266\
+0.057373412\
+0.08299547\
+0.108753545\
+0.134692803\
+0.160861247\
+0.187310622\
+0.214097505\
+0.241284636\
+0.268942609\
+0.297152044\
+0.326006462\
+0.355616165\
+0.386113619\
+0.417661144\
+0.450462243\
+0.484778987\
+0.520959934\
+0.559487654\
+0.601065905\
+0.646796326\
+0.698591632\
+0.760386833\
+0.843668136
+
+gaussian = gaussian_rho,gaussian_spearman,gaussian_kendall
+
+if (copula=="gaussian") {
+	return(gaussian)
+}
+else {
+    return(frank)
 }
 
 }

@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 1.1 September 2020}{...}
+{* *! version 1.2 March 2021}{...}
 {cmd: help qregsel}
 {hline}
 
@@ -21,7 +21,9 @@
 {cmd:copula(}{it:copula}{cmd:)}
 {cmdab:nocons:tant}
 {cmdab:finergrid}
+{cmdab:coarsergrid}
 {cmdab:rescale}
+{cmdab:nodots}
 ]
 
 {synoptset 20 tabbed}{...}
@@ -35,11 +37,15 @@
 {synopt:{opt copula:(copula)}}specifies a copula;
 	default is gaussian.{p_end}
 
-{synopt:{opt nocons:tant}}suppresses a constant term in the outcome equation.{p_end}
+{synopt:{opt nocons:tant}}suppress a constant term in the outcome equation.{p_end}
 
 {synopt:{opt finergrid:}}find the value of the copula parameter using a grid of 199 values instead of 100, as done by default.{p_end}
 
+{synopt:{opt coarsergrid:}}find the value of the copula parameter using a grid of 50 values instead of 100, as done by default.{p_end}
+
 {synopt:{opt rescale:}}rescale the regressors in the outcome equation.{p_end}
+
+{synopt:{opt nodots:}}suppress progress dots.{p_end}
 
 
 
@@ -80,6 +86,9 @@ Default is {bf:gaussian}.
 {opt finergrid} find the value of the copula parameter using a grid of 199 values instead of 100, as done by default. These values are chosen such that U and V have a rank correlation between -.99 and .99.
 
 {phang}
+{opt coarsergrid} find the value of the copula parameter using a grid of 50 values instead of 100, as done by default. These values are chosen such that U and V have a rank correlation approximately between -.99 and .97.
+
+{phang}
 {opt rescale} rescale the regressors of the outcome equation substracting sample mean and dividing by standard deviation..
  
 
@@ -91,8 +100,7 @@ Default is {bf:gaussian}.
 {synoptset 20 tabbed}{...}
 {p2col 5 20 24 2: Scalars}{p_end}
 {synopt:{cmd:e(N)}}number of observations{p_end}
-{synopt:{cmd:e(rank)}}number of parameters{p_end}
-{synopt:{cmd:e(df_r)}}degrees of freedom{p_end}
+{synopt:{cmd:e(N_selected)}}number of selected observations{p_end}
 {synopt:{cmd:e(rho)}}copula parameter{p_end}
 {synopt:{cmd:e(kendall)}}Kendall's tau{p_end}
 {synopt:{cmd:e(spearman)}}Spearman's rank correlation{p_end}
@@ -109,11 +117,13 @@ Default is {bf:gaussian}.
 {synopt:{cmd:e(predict)}}predict command name{p_end}
 {synopt:{cmd:e(rescale)}}use of rescale option{p_end}
 {synopt:{cmd:e(title)}}title in estimation output{p_end}
+{synopt:{cmd:e(properties)}}b{p_end}
 
 {synoptset 20 tabbed}{...}
 {p2col 5 20 24 2: Matrices}{p_end}
-{synopt:{cmd:e(coefs)}}coefficient matrix. Each column corresponds to the coefficients for a quantile{p_end}
+{synopt:{cmd:e(b)}}coefficients matrix{p_end}
 {synopt:{cmd:e(grid)}}matrix with the values of the objective function for each value of rho, and its respective Spearman rank correlation and Kendall's tau{p_end}
+{synopt:{cmd:e(coefs)}}coefficient matrix. Each column corresponds to the coefficients for a quantile{p_end}
 
 {synoptset 20 tabbed}{...}
 {p2col 5 20 24 2: Functions}{p_end}
