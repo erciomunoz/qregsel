@@ -249,8 +249,7 @@ real vector mywork(real vector y,
 	s = u - x  
 	yy = svsolve(A',c')'
 	r = c - yy * A
-	r = mm_cond(r:==0,r:+0.001,r)  
-	z = mm_cond(r:>0,r,0)
+	z = r :* (r:>0)
 	w = z - r
 	gap = c * x - yy * b + w * u
 
@@ -286,7 +285,7 @@ while (gap > small & it < max_it) {
 	fp = min((min(beta * fp), 1)) 
 	fd = min((min(beta * fd), 1)) 
 	
-if (mm_cond(fp:<fd,fp,fd) < 1) {
+if (min((fp,fd)) < 1) {
     
 // Update mu
     mu = z * x + w * s
