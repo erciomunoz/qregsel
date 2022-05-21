@@ -1,0 +1,7 @@
+v 1.5
+d Materials by Ercio Munoz and Mariel Siravegna
+d emunozsaavedra@gc.cuny.edu and mcs92@georgetown.edu
+
+d 'qregsel': This command implements Arellano, M., and S. Bonhomme. 2017. Quantile Selection Models With an Application to Understanding Changes in Wage Inequality. Econometrica 85(1): 1–28.
+
+p qregsel

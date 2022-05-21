@@ -1,0 +1,9 @@
+v 1.5
+d 'QREGSEL': qregsel: Quantile Selection Models in Stata
+d 
+d This command implements Arellano, M., and S. Bonhomme. 2017. Quantile Selection Models With an Application to Understanding Changes in Wage Inequality. Econometrica 85(1): 1–28.
+d 
+d Distribution-Date:   20220521
+d License: Academic Free License v3.0
+d 
+F qregsel.ado
